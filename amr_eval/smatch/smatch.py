@@ -858,10 +858,8 @@ justattribute=False, justrelation=False):
                                                              justinstance=arguments.justinstance,
                                                              justattribute=arguments.justattribute,
                                                              justrelation=arguments.justrelation):
-        if pr_flag:
-            precision = floatdisplay % precision
-            recall = floatdisplay % recall
-        best_f_score = floatdisplay % best_f_score
+        # don't need to print anything
+        pass
     arguments.file_handles[0].close()
     arguments.file_handles[1].close()
     return precision, recall, best_f_score, match_triple_dict
