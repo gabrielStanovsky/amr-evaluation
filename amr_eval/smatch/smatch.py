@@ -796,6 +796,37 @@ def get_amr_match(cur_amr1, cur_amr2, sent_num=1, justinstance=False, justattrib
     return best_match_num, test_triple_num, gold_triple_num, ex_stats
 
 
+def score_amr_pair(amr_1, amr_2, justinstance=False, justattribute=False, justrelation=False):
+    """
+    Score one pair of AMR lines.
+    :param amr_1: Iterable of strings to read AMR 1 lines from
+    :param amr_2: Iterable of strings to read AMR 2 lines from
+    :param justinstance: just pay attention to matching instances
+    :param justattribute: just pay attention to matching attributes
+    :param justrelation: just pay attention to matching relations
+    :return: precision, recall, f score of pair
+    """
+    # cur_amr1 = amr.AMR.get_amr_line(amr_1)
+    # cur_amr2 = amr.AMR.get_amr_line(amr_2)
+    best_match_num, test_triple_num, gold_triple_num, ex_stats = get_amr_match(amr_1, amr_2,
+                                                                         sent_num=1,  # sentence number
+                                                                         justinstance=justinstance,
+                                                                         justattribute=justattribute,
+                                                                         justrelation=justrelation)
+        
+    # clear the matching triple dictionary for the next AMR pair
+    match_triple_dict.clear()
+    
+    if verbose:
+        print("Total match number, total triple number in AMR 1, and total triple number in AMR 2:", file=DEBUG_LOG)
+        print(best_match_num, test_triple_num, gold_triple_num, file=DEBUG_LOG)
+        print("---------------------------------------------------------------------------------", file=DEBUG_LOG)
+        
+    # if each AMR pair should have a score, compute and output it here
+    return compute_f(best_match_num, test_triple_num, gold_triple_num)
+
+    
+
 def score_amr_pairs(f1, f2, justinstance=False, justattribute=False, justrelation=False):
     """
     Score one pair of AMR lines at a time from each file handle
@@ -829,7 +860,23 @@ def score_amr_pairs(f1, f2, justinstance=False, justattribute=False, justrelatio
     if single_score:  # output document-level smatch score (a single f-score for all AMR pairs in two files)
         yield compute_f(total_match_num, total_test_num, total_gold_num)
 
-def run_smatch(file_pair, r=4, significant=2, ms=True, v=True, vv=True, pr=True, justinstance=False,
+
+def run_smatch_files(file_pair, r=4, significant=2, ms=True, v=True, vv=True, pr=True, justinstance=False,
+justattribute=False, justrelation=False):
+    
+    file_handles = [f.open() for f in file_pair]
+    amr_lines_1, amr_lines_2 = file_handles
+    precision, recall, best_f_score, match_triple_dict = run_smatch(amr_lines_1, amr_lines_2, r, significant, ms, v, vv, pr, justinstance,
+               justattribute, justrelation)
+    
+    file_handles[0].close()
+    file_handles[1].close()
+    
+    return precision, recall, best_f_score, match_triple_dict
+    
+    
+
+def run_smatch(amr_lines_1, amr_lines_2, r=4, significant=2, ms=True, v=True, vv=True, pr=True, justinstance=False,
 justattribute=False, justrelation=False):
     global verbose
     global veryVerbose
@@ -838,32 +885,58 @@ justattribute=False, justrelation=False):
     global pr_flag
     global match_triple_dict
 
-    file_handles = [f.open() for f in file_pair]
+    
 
-    arguments = Arguments(file_handles, r, significant, v, vv, ms, pr, justinstance, justattribute, justrelation)
+    
     # set the iteration number
     # total iteration number = restart number + 1
-    iteration_num = arguments.r + 1
-    if arguments.ms == True:
+    iteration_num = r + 1
+    if ms == True:
         single_score = False
-    if arguments.v == True:
+    if v == True:
         verbose = True
-    if arguments.vv == True:
+    if vv == True:
         veryVerbose = True
-    if arguments.pr == True:
+    if pr == True:
         pr_flag = True
-    # significant digits to print out
-    floatdisplay = "%%.%df" % arguments.significant
-    for (precision, recall, best_f_score) in score_amr_pairs(arguments.file_handles[0], arguments.file_handles[1],
-                                                             justinstance=arguments.justinstance,
-                                                             justattribute=arguments.justattribute,
-                                                             justrelation=arguments.justrelation):
+    for (precision, recall, best_f_score) in score_amr_pairs(amr_lines_1, amr_lines_2,
+                                                             justinstance=justinstance,
+                                                             justattribute=justattribute,
+                                                             justrelation=justrelation):
         # don't need to print anything
         pass
-    arguments.file_handles[0].close()
-    arguments.file_handles[1].close()
+    
     return precision, recall, best_f_score, match_triple_dict
 
+def run_smatch_single(amr_lines_1, amr_lines_2, r=4, significant=2, ms=True, v=True, vv=True, pr=True, justinstance=False,
+justattribute=False, justrelation=False):
+    global verbose
+    global veryVerbose
+    global iteration_num
+    global single_score
+    global pr_flag
+    global match_triple_dict
+
+    
+
+    
+    # set the iteration number
+    # total iteration number = restart number + 1
+    iteration_num = r + 1
+    if ms == True:
+        single_score = False
+    if v == True:
+        verbose = True
+    if vv == True:
+        veryVerbose = True
+    if pr == True:
+        pr_flag = True
+    precision, recall, best_f_score = score_amr_pair(amr_lines_1, amr_lines_2,
+                                                             justinstance=justinstance,
+                                                             justattribute=justattribute,
+                                                             justrelation=justrelation)
+    
+    return precision, recall, best_f_score
 
 def main(arguments):
     """
