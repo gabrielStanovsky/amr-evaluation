@@ -10,88 +10,133 @@ negation detection, reentrancy detection and SRL.
 '''
 
 import sys
-import smatch.amr as amr
-import smatch.smatch_fromlists as smatch
+import amr_eval.smatch.amr as amr
+import amr_eval.smatch.smatch_fromlists as smatch
+from pprint import pprint
 from collections import defaultdict
-from utils import *
+import logging
+import pdb
+from amr_eval.utils import *
 
-pred = open(sys.argv[1]).read().strip().split("\n\n")
-gold = open(sys.argv[2]).read().strip().split("\n\n")
 
-inters = defaultdict(int)
-golds = defaultdict(int)
-preds = defaultdict(int)
-reentrancies_pred = []
-reentrancies_gold = []
-srl_pred = []
-srl_gold = []
+def calc_metrics(pred, gold):
+    """
+    Calculate agreement metrics for given predicted and gold AMRs.
+    """
 
-k = 0
-tot = 0
-correct = 0
-for amr_pred, amr_gold in zip(pred, gold):
-    amr_pred = amr.AMR.parse_AMR_line(amr_pred.replace("\n","")) 
-    dict_pred = var2concept(amr_pred)
-    triples_pred = []
-    for t in amr_pred.get_triples()[1] + amr_pred.get_triples()[2]:
-        if t[0].endswith('-of'):
-            triples_pred.append((t[0][:-3], t[2], t[1]))
+    inters = defaultdict(int)
+    golds = defaultdict(int)
+    preds = defaultdict(int)
+    reentrancies_pred = []
+    reentrancies_gold = []
+    srl_pred = []
+    srl_gold = []
+
+    k = 0
+    tot = 0
+    correct = 0
+    for amr_pred, amr_gold in zip(pred, gold):
+        amr_pred = amr.AMR.parse_AMR_line(amr_pred.replace("\n","")) 
+        dict_pred = var2concept(amr_pred)
+        triples_pred = []
+        for t in amr_pred.get_triples()[1] + amr_pred.get_triples()[2]:
+            if t[0].endswith('-of'):
+                triples_pred.append((t[0][:-3], t[2], t[1]))
+            else:
+                triples_pred.append((t[0], t[1], t[2]))
+
+        amr_gold = amr.AMR.parse_AMR_line(amr_gold.replace("\n",""))
+        dict_gold = var2concept(amr_gold)
+        triples_gold = []
+        for t in amr_gold.get_triples()[1] + amr_gold.get_triples()[2]:
+            if t[0].endswith('-of'):
+                triples_gold.append((t[0][:-3], t[2], t[1]))
+            else:
+                triples_gold.append((t[0], t[1], t[2]))
+
+        list_pred = disambig(concepts(dict_pred))
+        list_gold = disambig(concepts(dict_gold))
+        inters["Concepts"] += len(list(set(list_pred) & set(list_gold)))
+        preds["Concepts"] += len(set(list_pred))
+        golds["Concepts"] += len(set(list_gold))
+        list_pred = disambig(namedent(dict_pred, triples_pred))
+        list_gold = disambig(namedent(dict_gold, triples_gold))
+        inters["Named Ent."] += len(list(set(list_pred) & set(list_gold)))
+        preds["Named Ent."] += len(set(list_pred))
+        golds["Named Ent."] += len(set(list_gold))
+        list_pred = disambig(negations(dict_pred, triples_pred))
+        list_gold = disambig(negations(dict_gold, triples_gold))
+        inters["Negations"] += len(list(set(list_pred) & set(list_gold)))
+        preds["Negations"] += len(set(list_pred))
+        golds["Negations"] += len(set(list_gold))
+
+        list_pred = disambig(wikification(triples_pred))
+        list_gold = disambig(wikification(triples_gold))
+        inters["Wikification"] += len(list(set(list_pred) & set(list_gold)))
+        preds["Wikification"] += len(set(list_pred))
+        golds["Wikification"] += len(set(list_gold))
+
+        reentrancies_pred.append(reentrancies(dict_pred, triples_pred))
+        reentrancies_gold.append(reentrancies(dict_gold, triples_gold))
+
+        srl_pred.append(srl(dict_pred, triples_pred))
+        srl_gold.append(srl(dict_gold, triples_gold))
+
+    scores = defaultdict(dict)
+
+    for score in preds:
+        if preds[score] > 0:
+            pr = inters[score]/float(preds[score])
         else:
-            triples_pred.append((t[0], t[1], t[2]))
-
-    amr_gold = amr.AMR.parse_AMR_line(amr_gold.replace("\n",""))
-    dict_gold = var2concept(amr_gold)
-    triples_gold = []
-    for t in amr_gold.get_triples()[1] + amr_gold.get_triples()[2]:
-        if t[0].endswith('-of'):
-            triples_gold.append((t[0][:-3], t[2], t[1]))
+            pr = -1
+        if golds[score] > 0:
+            rc = inters[score]/float(golds[score])
         else:
-            triples_gold.append((t[0], t[1], t[2]))
-    
-    list_pred = disambig(concepts(dict_pred))
-    list_gold = disambig(concepts(dict_gold))
-    inters["Concepts"] += len(list(set(list_pred) & set(list_gold)))
-    preds["Concepts"] += len(set(list_pred))
-    golds["Concepts"] += len(set(list_gold))
-    list_pred = disambig(namedent(dict_pred, triples_pred))
-    list_gold = disambig(namedent(dict_gold, triples_gold))
-    inters["Named Ent."] += len(list(set(list_pred) & set(list_gold)))
-    preds["Named Ent."] += len(set(list_pred))
-    golds["Named Ent."] += len(set(list_gold))
-    list_pred = disambig(negations(dict_pred, triples_pred))
-    list_gold = disambig(negations(dict_gold, triples_gold))
-    inters["Negations"] += len(list(set(list_pred) & set(list_gold)))
-    preds["Negations"] += len(set(list_pred))
-    golds["Negations"] += len(set(list_gold))
+            rc = -1
+        if pr + rc > 0:
+            f = 2*(pr*rc)/(pr+rc)
+            logging.debug (score, '-> P:', "{0:.2f}".format(pr), ', R:', "{0:.2f}".format(rc), ', F:', "{0:.2f}".format(f))
+        else:
+            f = -1
+            logging.debug (score, '-> P:', "{0:.2f}".format(pr), ', R:', "{0:.2f}".format(rc), ', F: 0.00')
+        total_annots = preds[score] + golds[score]
+        scores[score] = {"p": pr,
+                         "r": rc,
+                         "f1": f,
+                         "total": total_annots}
 
-    list_pred = disambig(wikification(triples_pred))
-    list_gold = disambig(wikification(triples_gold))
-    inters["Wikification"] += len(list(set(list_pred) & set(list_gold)))
-    preds["Wikification"] += len(set(list_pred))
-    golds["Wikification"] += len(set(list_gold))
+    pr, rc, f = smatch.main(reentrancies_pred, reentrancies_gold, True)
+    if ((len(reentrancies_pred) != 1) or (len(reentrancies_gold) != 1)):
+        pdb.set_trace()
+        raise Exception
 
-    reentrancies_pred.append(reentrancies(dict_pred, triples_pred))
-    reentrancies_gold.append(reentrancies(dict_gold, triples_gold))
-    
-    srl_pred.append(srl(dict_pred, triples_pred))
-    srl_gold.append(srl(dict_gold, triples_gold))
+    total_reentrancies = len(reentrancies_pred[0][0]) + len(reentrancies_gold[0][0])
 
-for score in preds:
-    if preds[score] > 0:
-        pr = inters[score]/float(preds[score])
-    else:
-        pr = 0
-    if golds[score] > 0:
-        rc = inters[score]/float(golds[score])
-    else:
-        rc = 0
-    if pr + rc > 0:
-        f = 2*(pr*rc)/(pr+rc)
-        print (score, '-> P:', "{0:.2f}".format(pr), ', R:', "{0:.2f}".format(rc), ', F:', "{0:.2f}".format(f))
-    else: 
-        print (score, '-> P:', "{0:.2f}".format(pr), ', R:', "{0:.2f}".format(rc), ', F: 0.00')
+    logging.debug ('Reentrancies -> P:', "{0:.2f}".format(float(pr)), ', R:', "{0:.2f}".format(float(rc)), ', F:', "{0:.2f}".format(float(f)))
+    scores["Reentrancies"] = {"p": pr,
+                              "r": rc,
+                              "f1": f,
+                              "total": total_reentrancies}
 
-pr, rc, f = smatch.main(reentrancies_pred, reentrancies_gold, True)
-print ('Reentrancies -> P:', "{0:.2f}".format(float(pr)), ', R:', "{0:.2f}".format(float(rc)), ', F:', "{0:.2f}".format(float(f)))
-pr, rc, f = smatch.main(srl_pred, srl_gold, True)
-print ('SRL -> P:', "{0:.2f}".format(float(pr)), ', R:', "{0:.2f}".format(float(rc)), ', F:', "{0:.2f}".format(float(f)))
+    pr, rc, f = smatch.main(srl_pred, srl_gold, True)
+    if ((len(srl_pred) != 1) or (len(srl_gold) != 1)):
+        pdb.set_trace()
+        raise Exception
+
+    total_srl = len(srl_pred[0][0]) + len(srl_gold[0][0])
+
+    logging.debug ('SRL -> P:', "{0:.2f}".format(float(pr)), ', R:', "{0:.2f}".format(float(rc)), ', F:', "{0:.2f}".format(float(f)))
+    scores["SRL"] = {"p": pr,
+                     "r": rc,
+                     "f1": f,
+                     "total": total_srl}
+
+    scores = dict(scores)
+    return scores
+
+if __name__ == "__main__":
+    pred = open(sys.argv[1]).read().strip().split("\n\n")
+    gold = open(sys.argv[2]).read().strip().split("\n\n")
+    scores = calc_metrics(pred, gold)
+    plogging.debug(scores)
+
