@@ -18,6 +18,35 @@ import logging
 import pdb
 from amr_eval.utils import *
 
+def get_operation_classification(triples, var_dict):
+    """
+    Get a mapping from textual element to operation type encoded in the input
+    AMR.
+    """
+    # Find all operations classifications by the "-enum" suffix
+    op_dict = dict([(var_name, operation_type)
+                    for (var_name, operation_type)
+                    in var_dict.items()
+                    if operation_type.endswith("-enum")])
+
+    # Find name mappings
+    name_maps = {}
+    for (rel, var, val) in triples:
+        if (rel in ["op1", "name"]):
+            name_maps[var] = val
+
+    # Traverse relations to find the classification
+    # of operations
+    op_class_map = {}
+    for (var, op_class) in op_dict.items():
+        op_name = name_maps[name_maps[var]]
+        if op_name != "event_":
+            # Only include explicit events
+            op_class_map[op_name] = op_class
+
+    return op_class_map
+
+
 
 def calc_metrics(pred, gold):
     """
@@ -81,6 +110,26 @@ def calc_metrics(pred, gold):
 
         srl_pred.append(srl(dict_pred, triples_pred))
         srl_gold.append(srl(dict_gold, triples_gold))
+
+        # Operation classification accuracy
+        op_class_pred = get_operation_classification(triples_pred, dict_pred)
+        op_class_gold = get_operation_classification(triples_gold, dict_gold)
+
+        # Find lexical triggers shared by both gold and pred
+        shared_event_triggers = op_class_pred.keys() & op_class_gold.keys()
+        num_of_triggers = len(shared_event_triggers)
+        pred_shared_items = [(k, op_class_pred[k]) for k in shared_event_triggers]
+        gold_shared_items = [(k, op_class_gold[k]) for k in shared_event_triggers]
+
+        # TODO: A subtle point here is regarding what happens if there's
+        # the same event, classification tuple appears more than once?
+        op_class_intersection = set(pred_shared_items) & set(gold_shared_items)
+        inters["op_class"] +=  len(op_class_intersection)
+
+        # TODO: this is inherently symmetrical?
+        preds["op_class"] += num_of_triggers
+        golds["op_class"] += num_of_triggers
+
 
     scores = defaultdict(dict)
 
